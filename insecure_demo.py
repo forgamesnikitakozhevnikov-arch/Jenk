@@ -1,33 +1,41 @@
 import hashlib
-import pickle
-import random
+import json
+import os
+import re
+import secrets
 import sqlite3
 import subprocess
 
 import requests
 import yaml
 
-DB_PASSWORD = "SuperSecret123!"
+DB_PASSWORD = os.environ["DB_PASSWORD"]  # секрет берётся из окружения
 
 def get_user(username):
     conn = sqlite3.connect("app.db")
-    query = f"SELECT * FROM users WHERE name = '{username}'"
-    return conn.execute(query).fetchall()
+    return conn.execute(
+        "SELECT * FROM users WHERE name = ?", (username,)  # параметризованный запрос
+    ).fetchall()
 
 def ping(host):
-    return subprocess.run("ping -c 1 " + host, shell=True)
+    # Проверка host по белому списку или регулярному выражению
+    if not re.fullmatch(r"[a-zA-Z0-9.-]+", host):
+        raise ValueError("Invalid host")
+    return subprocess.run(["ping", "-c", "1", host], check=False)  # без shell, аргументы списком
 
-def hash_password(password):
-    return hashlib.md5(password.encode()).hexdigest()
+def hash_password(password, salt=None):
+    salt = salt or os.urandom(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1)
+    return salt, digest
 
 def make_reset_token():
-    return str(random.random())
+    return secrets.token_urlsafe(32)  # криптостойкий генератор
 
 def load_config(text):
-    return yaml.load(text, Loader=yaml.Loader)
+    return yaml.safe_load(text)  # безопасная загрузка
 
 def load_session(data):
-    return pickle.loads(data)
+    return json.loads(data)  # безопасная десериализация вместо pickle
 
 def fetch(url):
-    return requests.get(url, verify=False)
+    return requests.get(url, timeout=10)  # проверка TLS включена, есть таймаут
